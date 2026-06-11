@@ -11,7 +11,8 @@ export interface PluginRuntime {
     debug: (msg: string, ...args: any[]) => void;
   };
   config: Record<string, any>;
-  webhookBaseUrl: string;
+  webhookBaseUrl?: string;
+  persistConfig?: (path: string, value: any) => void | Promise<void>;
 }
 
 let _runtime: PluginRuntime | null = null;

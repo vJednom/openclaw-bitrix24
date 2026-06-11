@@ -2,9 +2,18 @@ import type {
   Bitrix24MessageEvent,
   Bitrix24WelcomeEvent,
   Bitrix24BotDeleteEvent,
+  Bitrix24V2Event,
+  ChatType,
   IncomingMessage,
 } from './types.js';
 import { bbCodeToMarkdown } from './format.js';
+
+function normalizeChatType(type: string | undefined): ChatType {
+  if (type === 'P' || type === 'C' || type === 'O' || type === 'S') return type;
+  if (type === 'user' || type === 'private' || type === 'direct') return 'P';
+  if (type === 'open') return 'O';
+  return 'C';
+}
 
 /**
  * Parse a raw ONIMBOTMESSAGEADD event body into an IncomingMessage.
@@ -43,6 +52,58 @@ export function parseMessageEvent(body: Bitrix24MessageEvent): IncomingMessage |
     applicationToken: auth?.application_token,
     botId: bot.BOT_ID,
     botCode: bot.BOT_CODE,
+  };
+}
+
+/**
+ * Parse an imbot.v2 event queue item into an IncomingMessage.
+ */
+export function parseV2MessageEvent(event: Bitrix24V2Event, domain = ''): IncomingMessage | null {
+  const eventType = event.event ?? event.type;
+  if (eventType !== 'ONIMBOTV2MESSAGEADD' && eventType !== 'ONIMBOTV2COMMANDADD') {
+    return null;
+  }
+
+  const payload = event.data ?? event;
+  if (payload.user?.bot) return null;
+
+  const message = payload.message;
+  const chat = payload.chat;
+  const bot = payload.bot;
+  const user = payload.user;
+
+  if (!message || !chat || !bot?.id) return null;
+
+  const command = payload.command ?? event.command;
+  const commandText = command
+    ? [command.command, command.params].filter(Boolean).join(' ')
+    : undefined;
+  const text = message.text?.trim() ? message.text : commandText ?? '';
+  if (!text.trim()) return null;
+
+  const rawFiles = Array.isArray(message.params)
+    ? []
+    : message.params?.FILES ?? message.params?.files ?? [];
+
+  return {
+    messageId: Number(message.id ?? event.id ?? event.eventId ?? 0),
+    dialogId: chat.dialogId ?? String(message.chatId ?? chat.id ?? ''),
+    chatId: message.chatId ?? chat.id,
+    text: bbCodeToMarkdown(text),
+    fromUserId: Number(message.authorId ?? user?.id ?? 0),
+    fromUserName: user?.firstName || user?.name || '',
+    fromUserLastName: user?.lastName ?? '',
+    isBot: false,
+    chatType: normalizeChatType(chat.type),
+    files: rawFiles.map((f) => ({
+      id: String(f.id ?? ''),
+      name: f.name ?? '',
+      size: f.size ?? 0,
+      type: f.type ?? '',
+    })).filter((f) => f.id),
+    domain: event.auth?.domain ?? domain,
+    botId: bot.id,
+    botCode: bot.code ?? '',
   };
 }
 

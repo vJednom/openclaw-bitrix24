@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 // Mock axios before any imports that use it
 const mockPost = vi.fn();
@@ -70,9 +73,12 @@ function mockApiResponses(responses: Record<string, any>) {
 describe('Bitrix24Channel integration', () => {
   let channel: Bitrix24Channel;
   let runtime: PluginRuntime;
+  let stateDir: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    stateDir = mkdtempSync(path.join(tmpdir(), 'bitrix24-channel-test-'));
+    vi.stubEnv('OPENCLAW_STATE_DIR', stateDir);
 
     runtime = createMockRuntime();
     setBitrix24Runtime(runtime);
@@ -84,6 +90,7 @@ describe('Bitrix24Channel integration', () => {
           id: TEST_ACCOUNT_ID,
           webhookUrl: TEST_WEBHOOK_URL,
           domain: 'test-portal.bitrix24.ru',
+          eventMode: 'webhook',
           bot: {
             name: 'Test Bot',
             color: 'PURPLE',
@@ -96,6 +103,8 @@ describe('Bitrix24Channel integration', () => {
 
   afterEach(() => {
     channel.destroy();
+    vi.unstubAllEnvs();
+    rmSync(stateDir, { recursive: true, force: true });
   });
 
   // ── 1. configure ─────────────────────────────────────────────────────────
@@ -183,6 +192,45 @@ describe('Bitrix24Channel integration', () => {
       await expect(channel.startupAccount('nonexistent')).rejects.toThrow(
         'Account "nonexistent" not found',
       );
+    });
+
+    it('should register fetch mode with imbot.v2 by default', async () => {
+      const fetchChannel = new Bitrix24Channel();
+      fetchChannel.configure({
+        accounts: [
+          {
+            id: 'fetch-account',
+            webhookUrl: TEST_WEBHOOK_URL,
+            domain: 'test-portal.bitrix24.ru',
+            bot: {
+              name: 'Fetch Bot',
+              color: 'PURPLE',
+              workPosition: 'Fetch Assistant',
+            },
+          },
+        ],
+      });
+      mockApiResponses({
+        'imbot.v2.Bot.register': { bot: { id: 77, code: 'openclaw_fetch-account' } },
+        'imbot.v2.Event.get': { events: [], nextOffset: 1, hasMore: false },
+      });
+
+      await fetchChannel.startupAccount('fetch-account');
+
+      const registerCall = mockPost.mock.calls.find(
+        (call) => call[0] === '/imbot.v2.Bot.register',
+      );
+      expect(registerCall).toBeDefined();
+      expect(registerCall![1].fields.code).toBe('openclaw_fetch-account');
+      expect(registerCall![1].fields.eventMode).toBe('fetch');
+      expect(registerCall![1].fields.webhookUrl).toBeUndefined();
+      expect(registerCall![1].fields.botToken).toBeTruthy();
+
+      const account = fetchChannel.resolveAccount('fetch-account');
+      expect(account!.botId).toBe(77);
+      expect(account!.eventMode).toBe('fetch');
+
+      fetchChannel.destroy();
     });
   });
 
@@ -315,6 +363,7 @@ describe('Bitrix24Channel integration', () => {
             id: 'no-bot',
             webhookUrl: TEST_WEBHOOK_URL,
             domain: 'test-portal.bitrix24.ru',
+            eventMode: 'webhook',
           },
         ],
       });
@@ -341,6 +390,65 @@ describe('Bitrix24Channel integration', () => {
         (call) => call[0] === '/imbot.message.add',
       );
       expect(messageCall).toBeDefined();
+    });
+  });
+
+  describe('OpenClaw outbound adapter', () => {
+    it('should send to the standard channel "to" target', async () => {
+      const registeredChannels: any[] = [];
+      const { default: register } = await import('../../extensions/bitrix24/src/index.js');
+
+      mockApiResponses({
+        'imbot.message.add': 1001,
+      });
+
+      register({
+        logger: runtime.logger,
+        config: {
+          channels: {
+            bitrix24: {
+              accounts: [
+                {
+                  id: TEST_ACCOUNT_ID,
+                  webhookUrl: TEST_WEBHOOK_URL,
+                  domain: 'test-portal.bitrix24.ru',
+                  botId: 42,
+                  bot: {
+                    name: 'Test Bot',
+                    clientId: TEST_BOT_CLIENT_ID,
+                  },
+                },
+              ],
+            },
+          },
+        },
+        runtime: {},
+        persistConfig: vi.fn(),
+        registerChannel: (plugin: any) => registeredChannels.push(plugin),
+        registerService: vi.fn(),
+        registerCommand: vi.fn(),
+      });
+
+      const bitrixPlugin = registeredChannels[0].plugin;
+      expect(bitrixPlugin.messaging.targetResolver.looksLikeId('873', '873')).toBe(true);
+
+      const resolved = await bitrixPlugin.messaging.targetResolver.resolveTarget({
+        normalized: '873',
+      });
+      expect(resolved).toMatchObject({ to: '873', kind: 'user' });
+
+      await bitrixPlugin.outbound.sendText({
+        accountId: TEST_ACCOUNT_ID,
+        to: '873',
+        text: 'Hello',
+      });
+
+      const messageCall = mockPost.mock.calls.find(
+        (call) => call[0] === '/imbot.message.add',
+      );
+      expect(messageCall).toBeDefined();
+      expect(messageCall![1].DIALOG_ID).toBe('873');
+      expect(messageCall![1].MESSAGE).toBe('Hello');
     });
   });
 
@@ -531,6 +639,7 @@ describe('Bitrix24Channel integration', () => {
             id: 'no-bot',
             webhookUrl: TEST_WEBHOOK_URL,
             domain: 'test-portal.bitrix24.ru',
+            eventMode: 'webhook',
           },
         ],
       });

@@ -2,6 +2,7 @@ import { Bitrix24Channel } from './channel.js';
 import { setBitrix24Runtime, type PluginRuntime } from './runtime.js';
 import { createWebhookRouter } from '../../../src/bitrix24/webhook-server.js';
 import { createClientFromWebhook } from '../../../src/bitrix24/client.js';
+import { parseDialogId } from '../../../src/bitrix24/targets.js';
 import {
   getSetupInstructions,
   getQuickHint,
@@ -23,17 +24,139 @@ import {
  */
 export default function register(api: any): void {
   const channel = new Bitrix24Channel();
+  const CHANNEL_ID = 'bitrix24';
 
   // Initialize runtime for DI
   setBitrix24Runtime({
     logger: api.logger,
     config: api.config,
-    webhookBaseUrl: api.config?.gateway?.externalUrl ?? 'http://localhost:18789',
+    webhookBaseUrl: api.config?.gateway?.externalUrl,
+    persistConfig: api.persistConfig,
   });
 
   // Configure channel from user's openclaw config
   const channelConfig = api.config?.channels?.bitrix24 ?? {};
   channel.configure(channelConfig);
+
+  channel.onMessage(async (accountId, msg) => {
+    const channelRuntime = api.runtime?.channel;
+    if (!channelRuntime) {
+      api.logger.warn('Bitrix24 inbound runtime is unavailable; dropping message');
+      return;
+    }
+
+    const conversationKind = msg.chatType === 'P' ? 'direct' : 'group';
+    const route = channelRuntime.routing.resolveAgentRoute({
+      cfg: api.config,
+      channel: CHANNEL_ID,
+      accountId,
+      peer: {
+        kind: conversationKind,
+        id: msg.dialogId,
+      },
+    });
+    const sessionKey = route.sessionKey;
+
+    let typingTimer: ReturnType<typeof setInterval> | undefined;
+    const pulseTyping = () => {
+      channel.sendTypingIndicator(accountId, msg.dialogId).catch((err) => {
+        api.logger.debug?.(`Bitrix24 typing indicator failed: ${String(err)}`);
+      });
+    };
+
+    pulseTyping();
+    typingTimer = setInterval(pulseTyping, 9000);
+
+    try {
+      await channelRuntime.inbound.run({
+        channel: CHANNEL_ID,
+        accountId,
+        raw: msg,
+        adapter: {
+          ingest: (incoming: typeof msg) => ({
+            id: String(incoming.messageId),
+            timestamp: Date.now(),
+            rawText: incoming.text,
+            textForAgent: incoming.text,
+            textForCommands: incoming.text,
+            raw: incoming,
+          }),
+          resolveTurn: async (input: any) => {
+            const ctxPayload = channelRuntime.inbound.buildContext({
+              channel: CHANNEL_ID,
+              accountId,
+              timestamp: input.timestamp,
+              from: `${CHANNEL_ID}:${accountId}:${msg.fromUserId}`,
+              sender: {
+                id: String(msg.fromUserId),
+                name: [msg.fromUserName, msg.fromUserLastName].filter(Boolean).join(' '),
+              },
+              conversation: {
+                kind: conversationKind,
+                id: msg.dialogId,
+                label: msg.dialogId,
+              },
+              route: {
+                agentId: route.agentId,
+                accountId,
+                routeSessionKey: sessionKey,
+                dispatchSessionKey: sessionKey,
+              },
+              reply: { to: msg.dialogId },
+              message: {
+                rawBody: input.rawText,
+                commandBody: input.textForCommands,
+                bodyForAgent: input.textForAgent,
+              },
+              extra: {
+                messageId: String(msg.messageId),
+                chatId: msg.chatId ? String(msg.chatId) : undefined,
+                botId: String(msg.botId),
+                botCode: msg.botCode,
+                domain: msg.domain,
+              },
+            });
+            const storePath = channelRuntime.session.resolveStorePath(api.config.session?.store, {
+              agentId: route.agentId,
+            });
+
+            return {
+              cfg: api.config,
+              channel: CHANNEL_ID,
+              accountId,
+              agentId: route.agentId,
+              routeSessionKey: sessionKey,
+              storePath,
+              ctxPayload,
+              recordInboundSession: channelRuntime.session.recordInboundSession,
+              dispatchReplyWithBufferedBlockDispatcher:
+                channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher,
+              delivery: {
+                durable: () => ({ to: msg.dialogId }),
+                deliver: async (payload: { text?: string }) => {
+                  if (!payload.text) return { visibleReplySent: false };
+                  await channel.sendTextMessage(accountId, msg.dialogId, payload.text);
+                  return { visibleReplySent: true };
+                },
+              },
+              dispatcherOptions: {
+                onReplyStart: pulseTyping,
+              },
+            };
+          },
+        },
+      });
+    } catch (err) {
+      api.logger.error(`Bitrix24 inbound dispatch failed: ${String(err)}`);
+      await channel.sendTextMessage(
+        accountId,
+        msg.dialogId,
+        'Omlouvám se, teď se mi nepodařilo zpracovat zprávu.',
+      ).catch(() => {});
+    } finally {
+      if (typingTimer) clearInterval(typingTimer);
+    }
+  });
 
   // Wire OAuth token persistence
   channel.setTokenRefreshCallback((accountId, tokens) => {
@@ -50,7 +173,7 @@ export default function register(api: any): void {
     plugin: {
       id: 'bitrix24',
       meta: {
-        id: 'bitrix24',
+        id: CHANNEL_ID,
         label: 'Bitrix24',
         selectionLabel: 'Bitrix24 Messenger',
         blurb: 'Chat with your OpenClaw agent through Bitrix24 Messenger.',
@@ -61,17 +184,55 @@ export default function register(api: any): void {
         listAccountIds: () => channel.listAccountIds(),
         resolveAccount: (_cfg: any, accountId: string) => channel.resolveAccount(accountId),
       },
+      messaging: {
+        targetPrefixes: ['bitrix24', 'bitrix', 'b24'],
+        normalizeTarget: (target: string) => target
+          .trim()
+          .replace(/^(?:bitrix24|bitrix|b24):/i, '')
+          .trim(),
+        inferTargetChatType: ({ to }: { to: string }) => {
+          try {
+            return parseDialogId(to).type === 'user' ? 'direct' : 'group';
+          } catch {
+            return undefined;
+          }
+        },
+        targetResolver: {
+          hint: '<userId|chatId|chat123>',
+          looksLikeId: (raw: string, normalized?: string) => {
+            const value = normalized ?? raw;
+            try {
+              parseDialogId(value);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          resolveTarget: async ({ normalized }: { normalized: string }) => {
+            const parsed = parseDialogId(normalized);
+            return {
+              to: parsed.dialogId,
+              kind: parsed.type === 'user' ? 'user' : 'group',
+              display: parsed.dialogId,
+              source: 'normalized',
+            };
+          },
+        },
+      },
       outbound: {
         deliveryMode: 'direct',
-        sendText: async ({ accountId, dialogId, text, media }: {
+        sendText: async ({ accountId, to, dialogId, text, media }: {
           accountId: string;
+          to?: string;
           dialogId: string;
           text: string;
           media?: any[];
         }) => {
+          const resolvedDialogId = to ?? dialogId;
+          if (!resolvedDialogId) throw new Error('Bitrix24 outbound target is required');
           await channel.sendTextMessage(
             accountId ?? channel.resolveDefaultAccountId(),
-            dialogId,
+            resolvedDialogId,
             text,
             media,
           );
@@ -84,7 +245,9 @@ export default function register(api: any): void {
   // Register webhook service for incoming Bitrix24 events
   const webhookRouter = createWebhookRouter({
     onMessage: (accountId, msg) => {
-      channel.handleIncomingMessage(accountId, msg);
+      channel.handleIncomingMessage(accountId, msg).catch((err) => {
+        api.logger.error(`Bitrix24 webhook dispatch failed: ${String(err)}`);
+      });
     },
     onWelcome: (accountId, event) => {
       if (event) {
@@ -105,7 +268,7 @@ export default function register(api: any): void {
   });
 
   api.registerService({
-    id: 'bitrix24-webhook',
+    id: 'bitrix24-events',
     router: webhookRouter,
     start: async () => {
       const accounts = channel.listEnabledAccounts();
@@ -123,11 +286,11 @@ export default function register(api: any): void {
           api.logger.error(`Failed to start Bitrix24 account "${account.id}":`, err);
         }
       }
-      api.logger.info('Bitrix24 webhook service started');
+      api.logger.info('Bitrix24 event service started');
     },
     stop: () => {
       channel.destroy();
-      api.logger.info('Bitrix24 webhook service stopped');
+      api.logger.info('Bitrix24 event service stopped');
     },
   });
 

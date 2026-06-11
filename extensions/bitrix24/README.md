@@ -26,7 +26,7 @@ export BITRIX24_WEBHOOK_URL="https://your-portal.bitrix24.ru/rest/1/your-secret/
 openclaw start
 ```
 
-The bot appears in Bitrix24 Messenger automatically.
+The bot appears in Bitrix24 Messenger automatically. Incoming messages use Bitrix24 `imbot.v2` fetch polling by default, so a private/NATed OpenClaw install does not need a public callback URL.
 
 ## Multi-Account / OAuth
 
@@ -36,6 +36,7 @@ channels:
     accounts:
       - id: main
         webhookUrl: "https://portal-a.bitrix24.ru/rest/1/secret1/"
+        eventMode: fetch
         bot:
           name: "Sales Bot"
           color: AZURE
@@ -53,6 +54,8 @@ channels:
 ```
 
 OAuth tokens are refreshed automatically when `clientId` and `clientSecret` are provided.
+
+Use `eventMode: fetch` (default) for outbound polling with `imbot.v2.Event.get`. Use `eventMode: webhook` only if your OpenClaw `gateway.externalUrl` is publicly reachable over HTTPS and you want Bitrix24 to POST incoming events to OpenClaw.
 
 For `imbot.*` calls, the plugin also needs a bot `CLIENT_ID`:
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseMessageEvent, verifyApplicationToken } from '../../src/bitrix24/receive.js';
-import type { Bitrix24MessageEvent } from '../../src/bitrix24/types.js';
+import { parseMessageEvent, parseV2MessageEvent, verifyApplicationToken } from '../../src/bitrix24/receive.js';
+import type { Bitrix24MessageEvent, Bitrix24V2Event } from '../../src/bitrix24/types.js';
 
 function makeEvent(overrides: Partial<{
   isBot: 'Y' | 'N';
@@ -68,6 +68,116 @@ describe('parseMessageEvent', () => {
     const msg = parseMessageEvent(event);
     expect(msg!.files).toHaveLength(1);
     expect(msg!.files[0].name).toBe('photo.jpg');
+  });
+});
+
+describe('parseV2MessageEvent', () => {
+  function makeV2Event(overrides: Partial<Bitrix24V2Event> = {}): Bitrix24V2Event {
+    return {
+      id: 1000,
+      event: 'ONIMBOTV2MESSAGEADD',
+      bot: { id: 1, code: 'openclaw_default' },
+      message: {
+        id: 500,
+        chatId: 200,
+        authorId: 42,
+        text: '[b]Hello[/b] from v2',
+      },
+      chat: {
+        id: 200,
+        dialogId: 'chat200',
+        type: 'chat',
+      },
+      user: {
+        id: 42,
+        name: 'Ivan Petrov',
+        firstName: 'Ivan',
+        lastName: 'Petrov',
+        bot: false,
+      },
+      ...overrides,
+    };
+  }
+
+  it('parses ONIMBOTV2MESSAGEADD events', () => {
+    const msg = parseV2MessageEvent(makeV2Event(), 'test.bitrix24.ru');
+    expect(msg).not.toBeNull();
+    expect(msg!.messageId).toBe(500);
+    expect(msg!.dialogId).toBe('chat200');
+    expect(msg!.chatId).toBe(200);
+    expect(msg!.text).toBe('**Hello** from v2');
+    expect(msg!.fromUserId).toBe(42);
+    expect(msg!.fromUserName).toBe('Ivan');
+    expect(msg!.fromUserLastName).toBe('Petrov');
+    expect(msg!.chatType).toBe('C');
+    expect(msg!.domain).toBe('test.bitrix24.ru');
+    expect(msg!.botId).toBe(1);
+    expect(msg!.botCode).toBe('openclaw_default');
+  });
+
+  it('parses Bitrix queue events with nested data payloads', () => {
+    const msg = parseV2MessageEvent({
+      eventId: 3,
+      type: 'ONIMBOTV2MESSAGEADD',
+      data: {
+        bot: { id: 903, code: 'openclaw_default' },
+        message: {
+          id: 536103,
+          chatId: 9957,
+          authorId: 873,
+          text: 'Ahoj Tealku',
+          params: [],
+        },
+        chat: {
+          id: 9957,
+          dialogId: '873',
+          type: 'private',
+        },
+        user: {
+          id: 873,
+          name: 'Zdenek Hasek',
+          firstName: 'Zdenek',
+          lastName: 'Hasek',
+          bot: false,
+        },
+      },
+    }, 'vjednom.bitrix24.eu');
+
+    expect(msg).not.toBeNull();
+    expect(msg!.messageId).toBe(536103);
+    expect(msg!.dialogId).toBe('873');
+    expect(msg!.chatId).toBe(9957);
+    expect(msg!.text).toBe('Ahoj Tealku');
+    expect(msg!.fromUserId).toBe(873);
+    expect(msg!.fromUserName).toBe('Zdenek');
+    expect(msg!.chatType).toBe('P');
+    expect(msg!.botId).toBe(903);
+  });
+
+  it('parses ONIMBOTV2COMMANDADD as inbound text', () => {
+    const msg = parseV2MessageEvent(makeV2Event({
+      event: 'ONIMBOTV2COMMANDADD',
+      message: {
+        id: 501,
+        chatId: 200,
+        authorId: 42,
+        text: '',
+      },
+      command: {
+        command: '/ask',
+        params: 'status please',
+      },
+    }), 'test.bitrix24.ru');
+
+    expect(msg).not.toBeNull();
+    expect(msg!.text).toBe('/ask status please');
+  });
+
+  it('returns null for bot-authored v2 messages', () => {
+    const msg = parseV2MessageEvent(makeV2Event({
+      user: { id: 2, name: 'Other Bot', bot: true },
+    }));
+    expect(msg).toBeNull();
   });
 });
 

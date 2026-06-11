@@ -33,7 +33,7 @@ export BITRIX24_WEBHOOK_URL="https://your-portal.bitrix24.ru/rest/1/abc123def/"
 openclaw start
 ```
 
-The plugin registers a chatbot in your Bitrix24 portal automatically on startup. Open Messenger, find the bot ("OpenClaw Agent"), and start chatting.
+The plugin registers a chatbot in your Bitrix24 portal automatically on startup. By default it uses Bitrix24 `imbot.v2` fetch polling, so OpenClaw can receive messages without exposing a public gateway URL. Open Messenger, find the bot ("OpenClaw Agent"), and start chatting.
 
 ### 5. Verify
 
@@ -47,7 +47,7 @@ Run `/b24status` inside OpenClaw to check the connection:
 
 ## Configuration
 
-The plugin supports two auth methods: webhook URL (simple) and OAuth (multi-portal).
+The plugin supports two auth methods: webhook URL (simple) and OAuth (multi-portal). Incoming bot events default to `eventMode: fetch`, where OpenClaw polls Bitrix24 over outbound HTTPS.
 
 ### Option A: Webhook URL (quick setup)
 
@@ -59,7 +59,10 @@ Or add it to your `openclaw.yaml`:
 channels:
   bitrix24:
     webhookUrl: "https://your-portal.bitrix24.ru/rest/1/abc123def/"
+    eventMode: fetch
 ```
+
+`eventMode: fetch` does not require `gateway.externalUrl` to be public. Use `eventMode: webhook` only when you want Bitrix24 to POST events into OpenClaw; that mode requires a publicly reachable HTTPS `gateway.externalUrl`.
 
 ### Option B: Multi-account / OAuth
 
@@ -69,6 +72,8 @@ channels:
     accounts:
       - id: main
         webhookUrl: "https://portal-a.bitrix24.ru/rest/1/secret1/"
+        eventMode: fetch
+        pollIntervalMs: 5000
         bot:
           name: "Sales Bot"
           color: AZURE
@@ -102,6 +107,11 @@ channels:
 | `accounts[].clientId` | string | -- | OAuth app clientId used for token refresh |
 | `accounts[].clientSecret` | string | -- | OAuth app clientSecret used for token refresh |
 | `accounts[].enabled` | boolean | `true` | Enable/disable account |
+| `accounts[].eventMode` | string | `"fetch"` | `"fetch"` polls `imbot.v2.Event.get`; `"webhook"` requires public HTTPS `gateway.externalUrl` |
+| `accounts[].botToken` | string | auto for webhooks | Token passed to `imbot.v2` fetch calls for webhook-backed bots |
+| `accounts[].pollIntervalMs` | number | `5000` | Fetch polling interval |
+| `accounts[].pollLimit` | number | `100` | Max events fetched per request, capped at 1000 |
+| `accounts[].nextOffset` | number | persisted | Last committed Bitrix24 event queue offset |
 | `accounts[].textChunkLimit` | number | `4000` | Max characters per message |
 | `accounts[].dmPolicy` | string | `"open"` | `"open"` or `"paired"` |
 | `accounts[].bot.name` | string | `"OpenClaw Agent"` | Bot display name |
@@ -129,6 +139,12 @@ Bitrix24 `imbot.*` methods require a stable secret `CLIENT_ID` tied to the bot c
 - the same `CLIENT_ID` is reused for `imbot.register`, `imbot.message.add`, `imbot.chat.sendTyping`, `imbot.message.update`, `imbot.message.delete`, and `imbot.unregister`
 
 Do not expose this value publicly. It is part of the bot control boundary.
+
+## Incoming Event Modes
+
+Default `fetch` mode registers the bot with `imbot.v2.Bot.register` and `eventMode: "fetch"`, then runs one background poller per configured account. The poller calls `imbot.v2.Event.get`, converts `ONIMBOTV2MESSAGEADD` and `ONIMBOTV2COMMANDADD` into normal OpenClaw inbound messages, and commits `nextOffset` only after handoff. Polling state is stored under the OpenClaw state directory so restarts do not replay an unbounded backlog.
+
+Optional `webhook` mode keeps the older inbound behavior. Bitrix24 sends POST requests to `{gateway.externalUrl}/webhook/bitrix24/{accountId}/message`, so `gateway.externalUrl` must be public HTTPS.
 
 ## Skill
 

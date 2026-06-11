@@ -40,6 +40,8 @@ export interface BotConfig {
   email?: string;
   /** Secret CLIENT_ID reused across all imbot.* calls for this bot. */
   clientId?: string;
+  /** Authorization token used by imbot.v2 fetch mode for webhook-backed bots. */
+  botToken?: string;
 }
 
 export type BotColor =
@@ -63,6 +65,12 @@ export interface AccountConfig {
   bot: BotConfig;
   botId?: number;
   botCode?: string;
+  botToken?: string;
+  eventMode: 'fetch' | 'webhook';
+  pollIntervalMs: number;
+  pollLimit: number;
+  nextOffset?: number;
+  processedEventIds: string[];
   dmPolicy: 'open' | 'paired';
 }
 
@@ -209,6 +217,74 @@ export interface Bitrix24BotDeleteEvent {
   auth?: {
     domain: string;
   };
+}
+
+// ── imbot.v2 Fetch Events ───────────────────────────────────────────────────
+
+export interface Bitrix24V2EventGetResult {
+  events?: Bitrix24V2Event[];
+  nextOffset?: number;
+  hasMore?: boolean;
+}
+
+export interface Bitrix24V2Event {
+  eventId?: number | string;
+  id?: number | string;
+  event?: string;
+  type?: string;
+  data?: {
+    bot?: Bitrix24V2Event['bot'];
+    message?: Bitrix24V2Event['message'];
+    chat?: Bitrix24V2Event['chat'];
+    user?: Bitrix24V2Event['user'];
+    command?: Bitrix24V2Event['command'];
+    [key: string]: any;
+  };
+  bot?: {
+    id?: number;
+    code?: string;
+  };
+  message?: {
+    id?: number;
+    chatId?: number;
+    authorId?: number;
+    text?: string;
+    params?: {
+      FILES?: Array<{
+        id?: string;
+        name?: string;
+        size?: number;
+        type?: string;
+      }>;
+      files?: Array<{
+        id?: string;
+        name?: string;
+        size?: number;
+        type?: string;
+      }>;
+    };
+  };
+  chat?: {
+    id?: number;
+    dialogId?: string;
+    type?: string;
+    name?: string;
+  };
+  user?: {
+    id?: number;
+    name?: string;
+    firstName?: string;
+    lastName?: string;
+    bot?: boolean;
+  };
+  command?: {
+    command?: string;
+    params?: string;
+  };
+  auth?: {
+    domain?: string;
+  };
+  [key: string]: any;
 }
 
 // ── REST API Response ────────────────────────────────────────────────────────

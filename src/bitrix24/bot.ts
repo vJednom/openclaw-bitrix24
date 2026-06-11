@@ -41,6 +41,94 @@ export async function registerBot(
 }
 
 /**
+ * Register an imbot.v2 chatbot using either fetch or webhook event delivery.
+ */
+export async function registerBotV2(
+  client: Bitrix24Client,
+  accountId: string,
+  config: BotConfig,
+  options: {
+    eventMode: 'fetch' | 'webhook';
+    webhookBaseUrl?: string;
+    botToken?: string;
+  },
+): Promise<BotRegistrationResult> {
+  const code = `openclaw_${accountId}`;
+  const fields: Record<string, any> = {
+    code,
+    type: 'bot',
+    eventMode: options.eventMode,
+    properties: {
+      name: config.name,
+      lastName: config.lastName ?? '',
+      color: config.color ?? 'PURPLE',
+      workPosition: config.workPosition ?? 'AI Assistant',
+      email: config.email ?? `openclaw-${accountId}@openclaw.bot`,
+      personalPhoto: config.avatar,
+    },
+  };
+
+  if (options.botToken) fields.botToken = options.botToken;
+
+  if (options.eventMode === 'webhook') {
+    if (!options.webhookBaseUrl) {
+      throw new Error('Bitrix24 webhook mode requires gateway.externalUrl to be a publicly reachable HTTPS URL');
+    }
+    fields.webhookUrl = `${options.webhookBaseUrl.replace(/\/$/, '')}/webhook/bitrix24/${accountId}/v2`;
+  }
+
+  const result = await client.callMethod<any>('imbot.v2.Bot.register', { fields });
+  const botId = result?.bot?.id ?? result?.id ?? result?.BOT_ID ?? result;
+  const botCode = result?.bot?.code ?? result?.code ?? code;
+
+  return { botId: Number(botId), botCode };
+}
+
+/**
+ * Update imbot.v2 bot event delivery/properties when the bot already exists.
+ */
+export async function updateBotV2(
+  client: Bitrix24Client,
+  botId: number,
+  config: Partial<BotConfig>,
+  options: {
+    eventMode?: 'fetch' | 'webhook';
+    webhookBaseUrl?: string;
+    botToken?: string;
+    accountId?: string;
+  } = {},
+): Promise<void> {
+  const fields: Record<string, any> = {};
+
+  if (config.name !== undefined || config.lastName !== undefined || config.color !== undefined
+    || config.workPosition !== undefined || config.avatar !== undefined) {
+    fields.properties = {};
+    if (config.name !== undefined) fields.properties.name = config.name;
+    if (config.lastName !== undefined) fields.properties.lastName = config.lastName;
+    if (config.color !== undefined) fields.properties.color = config.color;
+    if (config.workPosition !== undefined) fields.properties.workPosition = config.workPosition;
+    if (config.avatar !== undefined) fields.properties.personalPhoto = config.avatar;
+  }
+
+  if (options.eventMode) fields.eventMode = options.eventMode;
+  if (options.botToken) fields.botToken = options.botToken;
+
+  if (options.eventMode === 'webhook') {
+    if (!options.webhookBaseUrl || !options.accountId) {
+      throw new Error('Bitrix24 webhook mode requires gateway.externalUrl and accountId');
+    }
+    fields.webhookUrl = `${options.webhookBaseUrl.replace(/\/$/, '')}/webhook/bitrix24/${options.accountId}/v2`;
+  }
+
+  if (Object.keys(fields).length === 0) return;
+
+  await client.callMethod('imbot.v2.Bot.update', {
+    botId,
+    fields,
+  });
+}
+
+/**
  * Update bot properties (name, avatar, etc.).
  */
 export async function updateBot(

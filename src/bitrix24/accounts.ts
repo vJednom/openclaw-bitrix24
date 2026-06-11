@@ -12,6 +12,23 @@ function deriveBotClientId(auth: BitrixAuth, explicitClientId?: string): string 
   return createHash('md5').update(auth.webhookUrl.replace(/\/$/, '')).digest('hex');
 }
 
+function deriveBotToken(auth: BitrixAuth, explicitBotToken?: string, fallbackClientId?: string): string | undefined {
+  const provided = explicitBotToken?.trim();
+  if (provided) return provided;
+  if (auth.type !== 'webhook') return undefined;
+  return fallbackClientId ?? createHash('md5').update(`fetch:${auth.webhookUrl.replace(/\/$/, '')}`).digest('hex');
+}
+
+function normalizeEventMode(value: unknown): 'fetch' | 'webhook' {
+  return value === 'webhook' ? 'webhook' : 'fetch';
+}
+
+function normalizePositiveInt(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}
+
 /**
  * Manage multiple Bitrix24 portal accounts.
  */
@@ -50,6 +67,9 @@ export class AccountManager {
 
       const domain = raw.domain ?? extractDomain(auth);
 
+      const botClientId = deriveBotClientId(auth, raw.bot?.clientId);
+      const botToken = deriveBotToken(auth, raw.botToken ?? raw.bot?.botToken, botClientId);
+
       const account: AccountConfig = {
         id,
         domain,
@@ -62,10 +82,17 @@ export class AccountManager {
           color: raw.bot?.color ?? 'PURPLE',
           workPosition: raw.bot?.workPosition ?? 'AI Assistant',
           avatar: raw.bot?.avatar,
-          clientId: deriveBotClientId(auth, raw.bot?.clientId),
+          clientId: botClientId,
+          botToken,
         },
         botId: raw.botId,
         botCode: raw.botCode,
+        botToken,
+        eventMode: normalizeEventMode(raw.eventMode ?? raw.mode ?? config.eventMode),
+        pollIntervalMs: normalizePositiveInt(raw.pollIntervalMs, 1000),
+        pollLimit: Math.min(normalizePositiveInt(raw.pollLimit, 100), 1000),
+        nextOffset: raw.nextOffset,
+        processedEventIds: raw.processedEventIds?.slice(-200) ?? [],
         dmPolicy: raw.dmPolicy ?? 'open',
       };
 
@@ -80,6 +107,8 @@ export class AccountManager {
         isDefault: true,
       });
       if (auth) {
+        const botClientId = deriveBotClientId(auth);
+        const botToken = deriveBotToken(auth, undefined, botClientId);
         this.accounts.set('default', {
           id: 'default',
           domain: extractDomain(auth),
@@ -90,8 +119,14 @@ export class AccountManager {
             name: 'OpenClaw Agent',
             color: 'PURPLE',
             workPosition: 'AI Assistant',
-            clientId: deriveBotClientId(auth),
+            clientId: botClientId,
+            botToken,
           },
+          botToken,
+          eventMode: normalizeEventMode(config.eventMode),
+          pollIntervalMs: 1000,
+          pollLimit: 100,
+          processedEventIds: [],
           dmPolicy: 'open',
         });
       }
@@ -165,6 +200,14 @@ export class AccountManager {
     }
   }
 
+  setPollingState(accountId: string, nextOffset: number, processedEventIds: string[]): void {
+    const account = this.accounts.get(accountId);
+    if (account) {
+      account.nextOffset = nextOffset;
+      account.processedEventIds = processedEventIds.slice(-200);
+    }
+  }
+
   /**
    * Find account by bot code (for routing incoming events).
    */
@@ -204,6 +247,7 @@ export interface RawChannelConfig {
   webhookUrl?: string;
   clientId?: string;
   clientSecret?: string;
+  eventMode?: 'fetch' | 'webhook';
   accounts?: Array<{
     id?: string;
     domain?: string;
@@ -218,6 +262,13 @@ export interface RawChannelConfig {
     bot?: Partial<BotConfig>;
     botId?: number;
     botCode?: string;
+    botToken?: string;
+    mode?: 'fetch' | 'polling' | 'webhook';
+    eventMode?: 'fetch' | 'webhook';
+    pollIntervalMs?: number;
+    pollLimit?: number;
+    nextOffset?: number;
+    processedEventIds?: string[];
     dmPolicy?: 'open' | 'paired';
   }>;
 }

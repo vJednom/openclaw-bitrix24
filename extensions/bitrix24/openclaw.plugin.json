@@ -10,6 +10,88 @@
   "tags": ["channel", "messaging", "crm", "bitrix24", "bitrix", "b24", "imbot", "Битрикс24", "Битрикс", "задачи", "CRM"],
   "aliases": ["bitrix24", "bitrix", "b24", "Bitrix24", "Битрикс24", "Битрикс", "битрикс24", "битрикс"],
   "channels": ["bitrix24"],
+  "channelConfigs": {
+    "bitrix24": {
+      "label": "Bitrix24",
+      "description": "Bitrix24 Messenger channel configuration",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "webhookUrl": {
+            "type": "string",
+            "description": "Bitrix24 inbound webhook URL (e.g., https://your-portal.bitrix24.ru/rest/1/abc123/)",
+            "pattern": "^https://.+/rest/\\d+/[^/]+/?$"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "OAuth app clientId for token refresh on the default account"
+          },
+          "clientSecret": {
+            "type": "string",
+            "description": "OAuth app clientSecret for token refresh on the default account"
+          },
+          "eventMode": {
+            "type": "string",
+            "enum": ["fetch", "webhook"],
+            "default": "fetch",
+            "description": "Bitrix24 bot event delivery mode. fetch polls outbound and does not require public gateway.externalUrl."
+          },
+          "accounts": {
+            "type": "array",
+            "description": "Multiple Bitrix24 portals (advanced setup)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "description": "Unique account identifier" },
+                "webhookUrl": { "type": "string", "description": "Per-account webhook URL" },
+                "domain": { "type": "string", "description": "Portal domain (auto-extracted from webhook)" },
+                "accessToken": { "type": "string", "description": "OAuth access token" },
+                "refreshToken": { "type": "string", "description": "OAuth refresh token" },
+                "clientId": { "type": "string", "description": "OAuth app clientId for token refresh" },
+                "clientSecret": { "type": "string", "description": "OAuth app clientSecret for token refresh" },
+                "expiresAt": { "type": "number", "description": "OAuth token expiry timestamp in unix ms" },
+                "enabled": { "type": "boolean", "default": true },
+                "eventMode": { "type": "string", "enum": ["fetch", "webhook"], "default": "fetch" },
+                "botToken": { "type": "string", "description": "Authorization token used by imbot.v2 fetch mode for webhook-backed bots" },
+                "pollIntervalMs": { "type": "number", "default": 1000 },
+                "pollLimit": { "type": "number", "default": 100 },
+                "nextOffset": { "type": "number", "description": "Last committed imbot.v2 event queue offset" },
+                "textChunkLimit": { "type": "number", "default": 4000 },
+                "dmPolicy": { "type": "string", "enum": ["open", "paired"], "default": "open" },
+                "botId": { "type": "number" },
+                "botCode": { "type": "string" },
+                "bot": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string", "default": "OpenClaw Agent" },
+                    "lastName": { "type": "string" },
+                    "color": { "type": "string", "default": "PURPLE" },
+                    "workPosition": { "type": "string", "default": "AI Assistant" },
+                    "clientId": {
+                      "type": "string",
+                      "description": "Secret CLIENT_ID reused in every imbot.* call. Auto-derived from webhook for webhook accounts."
+                    },
+                    "botToken": {
+                      "type": "string",
+                      "description": "Authorization token used by imbot.v2 fetch mode"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "uiHints": {
+        "webhookUrl": {
+          "label": "Bitrix24 Webhook URL",
+          "placeholder": "https://your-portal.bitrix24.ru/rest/1/your-secret/",
+          "sensitive": true,
+          "helpText": "Create at: Portal > Developer resources > Other > Inbound webhook. Enable scopes: imbot, im, disk."
+        }
+      }
+    }
+  },
   "configSchema": {
     "type": "object",
     "properties": {
@@ -26,6 +108,12 @@
         "type": "string",
         "description": "OAuth app clientSecret for token refresh on the default account"
       },
+      "eventMode": {
+        "type": "string",
+        "enum": ["fetch", "webhook"],
+        "default": "fetch",
+        "description": "Bitrix24 bot event delivery mode. fetch polls outbound and does not require public gateway.externalUrl."
+      },
       "accounts": {
         "type": "array",
         "description": "Multiple Bitrix24 portals (advanced setup)",
@@ -41,6 +129,11 @@
             "clientSecret": { "type": "string", "description": "OAuth app clientSecret for token refresh" },
             "expiresAt": { "type": "number", "description": "OAuth token expiry timestamp in unix ms" },
             "enabled": { "type": "boolean", "default": true },
+            "eventMode": { "type": "string", "enum": ["fetch", "webhook"], "default": "fetch" },
+            "botToken": { "type": "string", "description": "Authorization token used by imbot.v2 fetch mode for webhook-backed bots" },
+            "pollIntervalMs": { "type": "number", "default": 1000 },
+            "pollLimit": { "type": "number", "default": 100 },
+            "nextOffset": { "type": "number", "description": "Last committed imbot.v2 event queue offset" },
             "textChunkLimit": { "type": "number", "default": 4000 },
             "dmPolicy": { "type": "string", "enum": ["open", "paired"], "default": "open" },
             "bot": {
@@ -53,6 +146,10 @@
                 "clientId": {
                   "type": "string",
                   "description": "Secret CLIENT_ID reused in every imbot.* call. Auto-derived from webhook for webhook accounts."
+                },
+                "botToken": {
+                  "type": "string",
+                  "description": "Authorization token used by imbot.v2 fetch mode"
                 }
               }
             }

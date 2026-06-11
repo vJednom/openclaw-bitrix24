@@ -66,7 +66,7 @@ export async function sendMessage(
 /**
  * Send typing indicator.
  */
-async function sendTyping(
+export async function sendTyping(
   client: Bitrix24Client,
   botId: number,
   botClientId: string,
