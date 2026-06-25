@@ -15,12 +15,17 @@ describe('markdownToBBCode', () => {
   });
 
   it('converts inline code', () => {
-    expect(markdownToBBCode('use `npm install`')).toBe('use [code]npm install[/code]');
+    expect(markdownToBBCode('use `npm install`')).toBe('use [b]npm install[/b]');
   });
 
   it('converts code blocks', () => {
     const md = '```js\nconst x = 1;\n```';
     expect(markdownToBBCode(md)).toBe('[code]const x = 1;\n[/code]');
+  });
+
+  it('protects code block contents from markdown formatting', () => {
+    const md = '```ts\nconst value = \"**not bold**\";\n```';
+    expect(markdownToBBCode(md)).toBe('[code]const value = "**not bold**";\n[/code]');
   });
 
   it('converts links', () => {
