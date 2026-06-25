@@ -10,12 +10,20 @@
  */
 export function markdownToBBCode(md: string): string {
   let text = md;
+  const codeBlocks: string[] = [];
 
-  // Code blocks (``` ... ```) → [code]...[/code]  — must be first to protect contents
-  text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '[code]$1[/code]');
+  // Code blocks (``` ... ```) → [code]...[/code].
+  // Keep them as placeholders while applying other markdown regexes so code contents
+  // are not accidentally bolded, italicized, or linkified.
+  text = text.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_match, code: string) => {
+    const index = codeBlocks.push(`[code]${code}[/code]`) - 1;
+    return `\u0000CODE_BLOCK_${index}\u0000`;
+  });
 
-  // Inline code (`...`) → [code]...[/code]
-  text = text.replace(/`([^`]+)`/g, '[code]$1[/code]');
+  // Inline code (`...`) → bold text.
+  // Bitrix renders inline [code] as visually heavy blocks; bold is much more readable
+  // for short method names, scopes, paths, and ids inside normal chat prose.
+  text = text.replace(/`([^`\n]+)`/g, '[b]$1[/b]');
 
   // Bold (**...**) → [b]...[/b]
   text = text.replace(/\*\*(.+?)\*\*/g, '[b]$1[/b]');
@@ -43,6 +51,10 @@ export function markdownToBBCode(md: string): string {
   // Blockquote (> ...) → remove prefix, wrap in [quote] is not standard in B24 BB-code
   // Just strip the > prefix
   text = text.replace(/^>\s?(.*)$/gm, '$1');
+
+  text = text.replace(/\u0000CODE_BLOCK_(\d+)\u0000/g, (_match, index: string) => {
+    return codeBlocks[Number(index)] ?? '';
+  });
 
   return text;
 }
