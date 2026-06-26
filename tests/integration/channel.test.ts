@@ -350,7 +350,7 @@ describe('Bitrix24Channel integration', () => {
       expect(sentMessage).toContain('[b]bold[/b]');
       expect(sentMessage).toContain('[i]italic[/i]');
       expect(sentMessage).toContain('[s]strikethrough[/s]');
-      expect(sentMessage).toContain('[code]inline code[/code]');
+      expect(sentMessage).toContain('[b]inline code[/b]');
       expect(sentMessage).toContain('[url=https://example.com]Link[/url]');
     });
 
@@ -390,6 +390,44 @@ describe('Bitrix24Channel integration', () => {
         (call) => call[0] === '/imbot.message.add',
       );
       expect(messageCall).toBeDefined();
+    });
+
+    it('should use the v2 bot token for typing when configured', async () => {
+      const tokenChannel = new Bitrix24Channel();
+      tokenChannel.configure({
+        accounts: [
+          {
+            id: 'token-account',
+            webhookUrl: TEST_WEBHOOK_URL,
+            domain: 'test-portal.bitrix24.ru',
+            botId: 77,
+            botToken: 'bot-token',
+            bot: {
+              name: 'Token Bot',
+              clientId: TEST_BOT_CLIENT_ID,
+            },
+          },
+        ],
+      });
+
+      mockApiResponses({
+        'imbot.v2.Chat.InputAction.notify': { result: true },
+        'imbot.message.add': 1001,
+      });
+
+      await tokenChannel.sendTextMessage('token-account', DIALOG_ID, 'test message');
+
+      const typingCall = mockPost.mock.calls.find(
+        (call) => call[0] === '/imbot.v2.Chat.InputAction.notify',
+      );
+      expect(typingCall).toBeDefined();
+      expect(typingCall![1]).toMatchObject({
+        botId: 77,
+        botToken: 'bot-token',
+        dialogId: DIALOG_ID,
+      });
+
+      tokenChannel.destroy();
     });
   });
 

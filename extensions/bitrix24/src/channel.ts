@@ -1,6 +1,6 @@
 import { AccountManager, type RawChannelConfig } from '../../../src/bitrix24/accounts.js';
 import { registerBot, registerBotV2, unregisterBot, updateBotV2 } from '../../../src/bitrix24/bot.js';
-import { sendMessage, sendTyping } from '../../../src/bitrix24/send.js';
+import { markBotMessagesRead, sendMessage, sendTyping } from '../../../src/bitrix24/send.js';
 import { downloadFile } from '../../../src/bitrix24/files.js';
 import { Bitrix24EventPoller } from '../../../src/bitrix24/poller.js';
 import { readPollingState, writePollingState } from '../../../src/bitrix24/polling-state.js';
@@ -69,6 +69,7 @@ export class Bitrix24Channel {
     await sendMessage(client, {
       botId: account.botId,
       botClientId: account.bot.clientId,
+      botToken: account.eventMode === 'fetch' ? account.botToken : undefined,
       dialogId,
       text,
       media,
@@ -82,10 +83,26 @@ export class Bitrix24Channel {
    */
   async sendTypingIndicator(accountId: string, dialogId: string): Promise<void> {
     const account = this.accountManager.getAccount(accountId);
-    if (!account || !account.botId || !account.bot.clientId) return;
+    if (!account || !account.botId) return;
+    if (!account.botToken && !account.bot.clientId) return;
 
     const client = this.accountManager.getClient(accountId);
-    await sendTyping(client, account.botId, account.bot.clientId, dialogId);
+    if (account.eventMode === 'fetch' && account.botToken) {
+      await sendTyping(client, account.botId, account.bot.clientId ?? '', dialogId, account.botToken);
+      return;
+    }
+    await sendTyping(client, account.botId, account.bot.clientId!, dialogId);
+  }
+
+  /**
+   * Mark incoming messages as read on behalf of the bot.
+   */
+  async markMessageRead(accountId: string, dialogId: string, messageId?: number): Promise<void> {
+    const account = this.accountManager.getAccount(accountId);
+    if (!account || !account.botId || account.eventMode !== 'fetch' || !account.botToken) return;
+
+    const client = this.accountManager.getClient(accountId);
+    await markBotMessagesRead(client, account.botId, account.botToken, dialogId, messageId);
   }
 
   /**

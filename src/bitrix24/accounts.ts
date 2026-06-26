@@ -94,6 +94,7 @@ export class AccountManager {
         nextOffset: raw.nextOffset,
         processedEventIds: raw.processedEventIds?.slice(-200) ?? [],
         dmPolicy: raw.dmPolicy ?? 'open',
+        session: raw.session ?? config.session,
       };
 
       this.accounts.set(id, account);
@@ -128,6 +129,7 @@ export class AccountManager {
           pollLimit: 100,
           processedEventIds: [],
           dmPolicy: 'open',
+          session: config.session,
         });
       }
     }
@@ -248,6 +250,7 @@ export interface RawChannelConfig {
   clientId?: string;
   clientSecret?: string;
   eventMode?: 'fetch' | 'webhook';
+  session?: AccountConfig['session'];
   accounts?: Array<{
     id?: string;
     domain?: string;
@@ -270,5 +273,6 @@ export interface RawChannelConfig {
     nextOffset?: number;
     processedEventIds?: string[];
     dmPolicy?: 'open' | 'paired';
+    session?: AccountConfig['session'];
   }>;
 }

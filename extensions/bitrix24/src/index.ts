@@ -13,6 +13,40 @@ import {
   isValidWebhookUrl,
 } from './setup-guide.js';
 
+export function formatDateInTimezone(date: Date, timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const get = (type: string) => parts.find((part) => part.type === type)?.value;
+    const year = get('year');
+    const month = get('month');
+    const day = get('day');
+    if (year && month && day) return `${year}-${month}-${day}`;
+  } catch {
+    // Fall through to UTC if the configured timezone is invalid.
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+export function resolveSessionPeerId(msg: { dialogId: string; chatId?: number }, account: any, now = new Date()): string {
+  const sessionConfig = account?.session ?? {};
+  const basePeerId = sessionConfig.perChat && msg.chatId
+    ? `chat${msg.chatId}`
+    : msg.dialogId;
+
+  if (!sessionConfig.dailyReset) return basePeerId;
+
+  const timezone = typeof sessionConfig.timezone === 'string' && sessionConfig.timezone.trim()
+    ? sessionConfig.timezone.trim()
+    : 'UTC';
+  return `${basePeerId}--day-${formatDateInTimezone(now, timezone)}`;
+}
+
 /**
  * OpenClaw Plugin Entry Point.
  *
@@ -46,13 +80,15 @@ export default function register(api: any): void {
     }
 
     const conversationKind = msg.chatType === 'P' ? 'direct' : 'group';
+    const account = channel.resolveAccount(accountId);
+    const routePeerId = resolveSessionPeerId(msg, account);
     const route = channelRuntime.routing.resolveAgentRoute({
       cfg: api.config,
       channel: CHANNEL_ID,
       accountId,
       peer: {
         kind: conversationKind,
-        id: msg.dialogId,
+        id: routePeerId,
       },
     });
     const sessionKey = route.sessionKey;
@@ -64,6 +100,9 @@ export default function register(api: any): void {
       });
     };
 
+    channel.markMessageRead(accountId, msg.dialogId, msg.messageId).catch((err) => {
+      api.logger.debug?.(`Bitrix24 read marker failed: ${String(err)}`);
+    });
     pulseTyping();
     typingTimer = setInterval(pulseTyping, 9000);
 
@@ -111,6 +150,7 @@ export default function register(api: any): void {
               extra: {
                 messageId: String(msg.messageId),
                 chatId: msg.chatId ? String(msg.chatId) : undefined,
+                routePeerId,
                 botId: String(msg.botId),
                 botCode: msg.botCode,
                 domain: msg.domain,

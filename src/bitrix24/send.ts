@@ -25,7 +25,7 @@ export async function sendMessage(
   const messageIds: string[] = [];
 
   // 1. Typing indicator
-  await sendTyping(client, msg.botId, msg.botClientId, msg.dialogId).catch(() => {
+  await sendTyping(client, msg.botId, msg.botClientId, msg.dialogId, msg.botToken).catch(() => {
     // Non-critical — ignore errors
   });
 
@@ -71,12 +71,50 @@ export async function sendTyping(
   botId: number,
   botClientId: string,
   dialogId: string,
+  botToken?: string,
 ): Promise<void> {
+  if (botToken) {
+    await sendBotInputAction(client, botId, botToken, dialogId);
+    return;
+  }
+
   await client.callMethod('imbot.chat.sendTyping', {
     CLIENT_ID: botClientId,
     BOT_ID: botId,
     DIALOG_ID: dialogId,
   });
+}
+
+export async function sendBotInputAction(
+  client: Bitrix24Client,
+  botId: number,
+  botToken: string,
+  dialogId: string,
+): Promise<void> {
+  await client.callMethod('imbot.v2.Chat.InputAction.notify', {
+    botId,
+    botToken,
+    dialogId,
+    statusMessageCode: 'IMBOT_AGENT_ACTION_THINKING',
+    duration: 30,
+  });
+}
+
+export async function markBotMessagesRead(
+  client: Bitrix24Client,
+  botId: number,
+  botToken: string,
+  dialogId: string,
+  messageId?: number,
+): Promise<void> {
+  const params: Record<string, number | string> = {
+    botId,
+    botToken,
+    dialogId,
+  };
+  if (messageId) params.messageId = messageId;
+
+  await client.callMethod('imbot.v2.Chat.Message.read', params);
 }
 
 /**

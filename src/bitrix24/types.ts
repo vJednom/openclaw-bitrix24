@@ -72,6 +72,13 @@ export interface AccountConfig {
   nextOffset?: number;
   processedEventIds: string[];
   dmPolicy: 'open' | 'paired';
+  session?: Bitrix24SessionConfig;
+}
+
+export interface Bitrix24SessionConfig {
+  perChat?: boolean;
+  dailyReset?: boolean;
+  timezone?: string;
 }
 
 // ── Messages ─────────────────────────────────────────────────────────────────
@@ -98,6 +105,7 @@ export type ChatType = 'P' | 'C' | 'O' | 'S';
 export interface OutgoingMessage {
   botId: number;
   botClientId: string;
+  botToken?: string;
   dialogId: string;
   text: string;
   media?: MediaAttachment[];
