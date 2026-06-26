@@ -1,8 +1,12 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Bitrix24Channel } from './channel.js';
 import { setBitrix24Runtime, type PluginRuntime } from './runtime.js';
 import { createWebhookRouter } from '../../../src/bitrix24/webhook-server.js';
 import { createClientFromWebhook } from '../../../src/bitrix24/client.js';
 import { parseDialogId } from '../../../src/bitrix24/targets.js';
+import type { FileAttachment, IncomingMessage } from '../../../src/bitrix24/types.js';
 import {
   getSetupInstructions,
   getQuickHint,
@@ -45,6 +49,61 @@ export function resolveSessionPeerId(msg: { dialogId: string; chatId?: number },
     ? sessionConfig.timezone.trim()
     : 'UTC';
   return `${basePeerId}--day-${formatDateInTimezone(now, timezone)}`;
+}
+
+function safeFileName(value: string, fallback: string): string {
+  const normalized = value
+    .trim()
+    .replace(/[^\w.\-()+ ]+/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 160);
+  return normalized || fallback;
+}
+
+function describeIncomingFiles(files: FileAttachment[]): string {
+  if (!files.length) return '';
+
+  return files
+    .map((file, index) => {
+      const parts = [`file ${index + 1}`, `id=${file.id}`];
+      if (file.name) parts.push(`name=${file.name}`);
+      if (file.type) parts.push(`type=${file.type}`);
+      if (file.size) parts.push(`size=${file.size}`);
+      return `[${parts.join(' ')}]`;
+    })
+    .join('\n');
+}
+
+async function materializeIncomingFiles(
+  channel: Bitrix24Channel,
+  accountId: string,
+  msg: IncomingMessage,
+  logger: PluginRuntime['logger'],
+): Promise<Array<{ path: string; contentType: string; name: string; id: string }>> {
+  if (!msg.files.length) return [];
+
+  const dir = join(tmpdir(), 'openclaw-bitrix24-attachments', safeFileName(accountId, 'account'));
+  await mkdir(dir, { recursive: true });
+
+  const media: Array<{ path: string; contentType: string; name: string; id: string }> = [];
+  for (const file of msg.files) {
+    try {
+      const attachment = await channel.downloadAttachment(accountId, file.id);
+      const fileName = safeFileName(attachment.fileName || file.name, `file-${file.id}`);
+      const path = join(dir, `${msg.messageId}-${file.id}-${fileName}`);
+      await writeFile(path, attachment.buffer, { mode: 0o600 });
+      media.push({
+        path,
+        contentType: attachment.mimeType || file.type || 'application/octet-stream',
+        name: attachment.fileName || file.name,
+        id: file.id,
+      });
+    } catch (err) {
+      logger.warn(`Bitrix24 attachment download failed for file "${file.id}": ${String(err)}`);
+    }
+  }
+
+  return media;
 }
 
 /**
@@ -116,11 +175,12 @@ export default function register(api: any): void {
             id: String(incoming.messageId),
             timestamp: Date.now(),
             rawText: incoming.text,
-            textForAgent: incoming.text,
+            textForAgent: [incoming.text, describeIncomingFiles(incoming.files)].filter(Boolean).join('\n'),
             textForCommands: incoming.text,
             raw: incoming,
           }),
           resolveTurn: async (input: any) => {
+            const media = await materializeIncomingFiles(channel, accountId, msg, api.logger);
             const ctxPayload = channelRuntime.inbound.buildContext({
               channel: CHANNEL_ID,
               accountId,
@@ -147,9 +207,18 @@ export default function register(api: any): void {
                 commandBody: input.textForCommands,
                 bodyForAgent: input.textForAgent,
               },
+              media: media.length
+                ? media.map((item) => ({
+                    path: item.path,
+                    url: item.path,
+                    contentType: item.contentType,
+                  }))
+                : undefined,
               extra: {
                 messageId: String(msg.messageId),
                 chatId: msg.chatId ? String(msg.chatId) : undefined,
+                files: msg.files.length ? msg.files : undefined,
+                media: media.length ? media.map(({ id, name, path, contentType }) => ({ id, name, path, contentType })) : undefined,
                 routePeerId,
                 botId: String(msg.botId),
                 botCode: msg.botCode,
