@@ -74,16 +74,36 @@ export function parseV2MessageEvent(event: Bitrix24V2Event, domain = ''): Incomi
 
   if (!message || !chat || !bot?.id) return null;
 
+  const rawFiles = Array.isArray(message.params)
+    ? []
+    : message.params?.FILES ?? message.params?.files ?? [];
+  const rawFileIds = Array.isArray(message.params)
+    ? []
+    : message.params?.FILE_ID ?? message.params?.fileId ?? [];
+  const fileIdAttachments = (Array.isArray(rawFileIds) ? rawFileIds : [rawFileIds])
+    .filter((id) => id !== undefined && id !== null && String(id).trim())
+    .map((id) => ({
+      id: String(id),
+      name: '',
+      size: 0,
+      type: '',
+    }));
+  const files = [
+    ...rawFiles.map((f) => ({
+      id: String(f.id ?? ''),
+      name: f.name ?? '',
+      size: f.size ?? 0,
+      type: f.type ?? '',
+    })),
+    ...fileIdAttachments,
+  ].filter((f) => f.id);
+
   const command = payload.command ?? event.command;
   const commandText = command
     ? [command.command, command.params].filter(Boolean).join(' ')
     : undefined;
-  const text = message.text?.trim() ? message.text : commandText ?? '';
-  if (!text.trim()) return null;
-
-  const rawFiles = Array.isArray(message.params)
-    ? []
-    : message.params?.FILES ?? message.params?.files ?? [];
+  const text = message.text?.trim() ? message.text : commandText ?? (files.length ? '[File attachment]' : '');
+  if (!text.trim() && files.length === 0) return null;
 
   return {
     messageId: Number(message.id ?? event.id ?? event.eventId ?? 0),
@@ -95,12 +115,7 @@ export function parseV2MessageEvent(event: Bitrix24V2Event, domain = ''): Incomi
     fromUserLastName: user?.lastName ?? '',
     isBot: false,
     chatType: normalizeChatType(chat.type),
-    files: rawFiles.map((f) => ({
-      id: String(f.id ?? ''),
-      name: f.name ?? '',
-      size: f.size ?? 0,
-      type: f.type ?? '',
-    })).filter((f) => f.id),
+    files,
     domain: event.auth?.domain ?? domain,
     botId: bot.id,
     botCode: bot.code ?? '',

@@ -154,6 +154,43 @@ describe('parseV2MessageEvent', () => {
     expect(msg!.botId).toBe(903);
   });
 
+  it('parses v2 file-only messages with FILE_ID params', () => {
+    const msg = parseV2MessageEvent({
+      eventId: 4,
+      type: 'ONIMBOTV2MESSAGEADD',
+      data: {
+        bot: { id: 903, code: 'openclaw_default' },
+        message: {
+          id: 540409,
+          chatId: 9977,
+          authorId: 873,
+          text: '',
+          params: {
+            FILE_ID: ['140837'],
+          },
+        },
+        chat: {
+          id: 9977,
+          dialogId: '873',
+          type: 'private',
+        },
+        user: {
+          id: 873,
+          name: 'Zdenek Hasek',
+          firstName: 'Zdenek',
+          lastName: 'Hasek',
+          bot: false,
+        },
+      },
+    }, 'vjednom.bitrix24.eu');
+
+    expect(msg).not.toBeNull();
+    expect(msg!.text).toBe('[File attachment]');
+    expect(msg!.files).toEqual([
+      { id: '140837', name: '', size: 0, type: '' },
+    ]);
+  });
+
   it('parses ONIMBOTV2COMMANDADD as inbound text', () => {
     const msg = parseV2MessageEvent(makeV2Event({
       event: 'ONIMBOTV2COMMANDADD',

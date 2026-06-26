@@ -262,6 +262,8 @@ export interface Bitrix24V2Event {
         size?: number;
         type?: string;
       }>;
+      FILE_ID?: Array<string | number> | string | number;
+      fileId?: Array<string | number> | string | number;
     };
   };
   chat?: {
