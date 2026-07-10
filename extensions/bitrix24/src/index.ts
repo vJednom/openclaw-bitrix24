@@ -251,6 +251,9 @@ export default function register(api: any): void {
               dispatcherOptions: {
                 onReplyStart: pulseTyping,
               },
+              replyOptions: {
+                suppressDefaultToolProgressMessages: true,
+              },
             };
           },
         },
